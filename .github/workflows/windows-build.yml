@@ -66,6 +66,47 @@ jobs:
         cmake --build C:\deps\qtkeychain-build --target install
         if errorlevel 1 exit /b 1
 
+    # QLog imports the OmniRig v1/v2 type libraries from the installed executables
+    - name: OmniRig v1 and v2
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        New-Item -ItemType Directory -Force C:\deps\omnirig | Out-Null
+        Set-Location C:\deps\omnirig
+        # --- v1 (VE3NEA) ---
+        Invoke-WebRequest -Uri "https://www.dxatlas.com/OmniRig/Files/OmniRig.zip" -OutFile v1.zip
+        Expand-Archive v1.zip -DestinationPath v1
+        $setup1 = Get-ChildItem v1 -Recurse -Filter *.exe | Select-Object -First 1
+        Start-Process $setup1.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait
+        if (-not (Test-Path 'C:\Program Files (x86)\Afreet\OmniRig\OmniRig.exe')) { throw 'OmniRig v1 not installed' }
+        # --- v2 (HB9RYZ) ---
+        $page = Invoke-WebRequest -Uri "https://www.hb9ryz.ch/omnirig/index.html" -UseBasicParsing
+        $links = $page.Links | ForEach-Object { $_.href } | Where-Object { $_ -match '\.(zip|exe)$' }
+        Write-Host "Links found:"; $links | ForEach-Object { Write-Host "  $_" }
+        $link = $links | Where-Object { $_ -match '(?i)omni' -and $_ -notmatch '(?i)ini|9700|7300|7610|rig[^/]*\.zip$' } | Select-Object -First 1
+        if (-not $link) { $link = $links | Where-Object { $_ -match '(?i)omni' } | Select-Object -First 1 }
+        $url = [System.Uri]::new([System.Uri]"https://www.hb9ryz.ch/omnirig/index.html", $link).AbsoluteUri
+        Write-Host "OmniRig v2 download: $url"
+        if ($url -match '\.zip$') {
+          Invoke-WebRequest -Uri $url -OutFile v2.zip
+          Expand-Archive v2.zip -DestinationPath v2
+          Get-ChildItem v2 -Recurse | ForEach-Object { Write-Host "  $($_.FullName)" }
+          $setup2 = Get-ChildItem v2 -Recurse -Filter *.exe | Where-Object { $_.Name -match '(?i)setup|install' } | Select-Object -First 1
+          $exe2 = Get-ChildItem v2 -Recurse -Filter omnirig2.exe | Select-Object -First 1
+        } else {
+          Invoke-WebRequest -Uri $url -OutFile v2setup.exe
+          $setup2 = Get-Item v2setup.exe
+        }
+        if ($setup2) { Start-Process $setup2.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait }
+        $target2 = 'C:\Program Files (x86)\Omni-Rig V2\omnirig2.exe'
+        if (-not (Test-Path $target2)) {
+          if (-not $exe2) { $exe2 = Get-ChildItem 'C:\Program Files (x86)' -Recurse -Filter omnirig2.exe -ErrorAction SilentlyContinue | Select-Object -First 1 }
+          if (-not $exe2) { throw 'omnirig2.exe not found' }
+          New-Item -ItemType Directory -Force (Split-Path $target2) | Out-Null
+          Copy-Item $exe2.FullName $target2
+        }
+        Get-Item 'C:\Program Files (x86)\Afreet\OmniRig\OmniRig.exe', $target2
+
     - name: jom
       shell: cmd
       run: choco install jom -y --no-progress
