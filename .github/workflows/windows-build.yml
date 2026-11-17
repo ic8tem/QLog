@@ -1,0 +1,139 @@
+name: Windows build (IC8TEM)
+
+# Builds a portable Windows x64 QLog (zip) with the IC8TEM changes
+# and publishes it as a GitHub Release on this fork.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ grid-statistics ]
+
+permissions:
+  contents: write
+
+env:
+  QT_VERSION: '6.8.3'
+  HAMLIB_VERSION: '4.6.5'
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v5
+
+    - name: Install Qt
+      uses: jurplel/install-qt-action@v4
+      with:
+        version: ${{ env.QT_VERSION }}
+        host: windows
+        target: desktop
+        arch: win64_msvc2022_64
+        modules: 'qtcharts qtwebengine qtwebchannel qtpositioning qtserialport qtwebsockets'
+        source: true
+        src-archives: 'qtbase'
+        cache: true
+
+    - name: MSVC environment
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: x64
+
+    - name: vcpkg (zlib, pthreads, openssl)
+      shell: cmd
+      run: |
+        "%VCPKG_INSTALLATION_ROOT%\vcpkg.exe" install zlib:x64-windows pthreads:x64-windows openssl:x64-windows
+        if errorlevel 1 exit /b 1
+
+    - name: Hamlib
+      shell: pwsh
+      run: |
+        $v = "$env:HAMLIB_VERSION"
+        Invoke-WebRequest -Uri "https://github.com/Hamlib/Hamlib/releases/download/$v/hamlib-w64-$v.zip" -OutFile hamlib.zip
+        Expand-Archive hamlib.zip -DestinationPath C:\deps
+        $root = "C:\deps\hamlib-w64-$v"
+        Push-Location "$root\lib\msvc"
+        if (-not (Test-Path libhamlib-4.lib)) { lib /nologo /machine:X64 /def:libhamlib-4.def /out:libhamlib-4.lib }
+        Pop-Location
+        "HAMLIB_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+    - name: QtKeychain
+      shell: cmd
+      run: |
+        git clone --depth 1 --branch 0.15.0 https://github.com/frankosterfeld/qtkeychain.git C:\deps\qtkeychain-src
+        cmake -S C:\deps\qtkeychain-src -B C:\deps\qtkeychain-build -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=Release -DBUILD_WITH_QT6=ON -DBUILD_TRANSLATIONS=OFF -DBUILD_TEST_APPLICATION=OFF -DCMAKE_PREFIX_PATH=%QT_ROOT_DIR% -DCMAKE_INSTALL_PREFIX=C:\deps\qtkeychain
+        if errorlevel 1 exit /b 1
+        cmake --build C:\deps\qtkeychain-build --target install
+        if errorlevel 1 exit /b 1
+
+    - name: jom
+      shell: cmd
+      run: choco install jom -y --no-progress
+
+    - name: qmake
+      shell: cmd
+      run: |
+        set VCPKG=%VCPKG_INSTALLATION_ROOT%\installed\x64-windows
+        for /f "tokens=1-3 delims=." %%a in ("%HAMLIB_VERSION%") do (set HMAJ=%%a& set HMIN=%%b& set HPAT=%%c)
+        mkdir build && cd build
+        qmake ..\QLog.pro -spec win32-msvc ^
+          "HAMLIBINCLUDEPATH=%HAMLIB_ROOT%\include" ^
+          "HAMLIBLIBPATH=%HAMLIB_ROOT%\lib\msvc" ^
+          "HAMLIBVERSION_MAJOR=%HMAJ%" "HAMLIBVERSION_MINOR=%HMIN%" "HAMLIBVERSION_PATCH=%HPAT%" ^
+          "QTKEYCHAININCLUDEPATH=C:\deps\qtkeychain\include" ^
+          "QTKEYCHAINLIBPATH=C:\deps\qtkeychain\lib" ^
+          "PTHREADINCLUDEPATH=%VCPKG%\include" "PTHREADLIBPATH=%VCPKG%\lib" ^
+          "ZLIBINCLUDEPATH=%VCPKG%\include" "ZLIBLIBPATH=%VCPKG%\lib" ^
+          "OPENSSLINCLUDEPATH=%VCPKG%\include" "OPENSSLLIBPATH=%VCPKG%\lib"
+        if errorlevel 1 exit /b 1
+
+    - name: Build
+      shell: cmd
+      working-directory: build
+      run: |
+        jom -j4 qmake_all
+        jom -j4 -f Makefile.Release
+        if errorlevel 1 exit /b 1
+
+    - name: Package
+      shell: cmd
+      run: |
+        set VCPKG=%VCPKG_INSTALLATION_ROOT%\installed\x64-windows
+        set OUT=%GITHUB_WORKSPACE%\QLog-win64
+        mkdir "%OUT%"
+        copy /Y build\release\qlog.exe "%OUT%\" || exit /b 1
+        copy /Y "%HAMLIB_ROOT%\bin\*.dll" "%OUT%\" || exit /b 1
+        copy /Y "%HAMLIB_ROOT%\bin\rigctld.exe" "%OUT%\"
+        copy /Y C:\deps\qtkeychain\bin\*.dll "%OUT%\" || exit /b 1
+        copy /Y "%VCPKG%\bin\zlib1.dll" "%OUT%\" || exit /b 1
+        copy /Y "%VCPKG%\bin\pthreadVC3.dll" "%OUT%\"
+        copy /Y "%VCPKG%\bin\libssl-3-x64.dll" "%OUT%\" || exit /b 1
+        copy /Y "%VCPKG%\bin\libcrypto-3-x64.dll" "%OUT%\" || exit /b 1
+        cd /d "%OUT%"
+        windeployqt -release --skip-plugin-types qmltooling,position,qml,qsqlpsql,qsqlodbc,qsqlmimer qlog.exe
+        if errorlevel 1 exit /b 1
+        dir
+
+    - name: Zip
+      shell: pwsh
+      run: |
+        $sha = "${{ github.sha }}".Substring(0,7)
+        $name = "QLog-IC8TEM-grid-stats-win64-$sha.zip"
+        Compress-Archive -Path QLog-win64\* -DestinationPath $name
+        "ZIP_NAME=$name" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v6
+      with:
+        name: QLog-IC8TEM-win64
+        path: ${{ env.ZIP_NAME }}
+
+    - name: Publish release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: grid-stats-${{ github.run_number }}
+        name: QLog + Grid Statistics (IC8TEM) build ${{ github.run_number }}
+        body: |
+          Portable Windows x64 build of QLog with the Grid Statistics table (DX Stats tab).
+          Unzip into a new folder and run qlog.exe.
+        files: ${{ env.ZIP_NAME }}
