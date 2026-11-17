@@ -154,6 +154,8 @@ jobs:
         copy /Y "%HAMLIB_ROOT%\bin\*.dll" "%OUT%\" || exit /b 1
         copy /Y "%HAMLIB_ROOT%\bin\rigctld.exe" "%OUT%\"
         copy /Y C:\deps\qtkeychain\bin\*.dll "%OUT%\" || exit /b 1
+        rem windeployqt treats qt6keychain.dll as a Qt module and looks for it in the Qt bin dir
+        copy /Y C:\deps\qtkeychain\bin\*.dll "%QT_ROOT_DIR%\bin\" || exit /b 1
         copy /Y "%VCPKG%\bin\*.dll" "%OUT%\" || exit /b 1
         cd /d "%OUT%"
         windeployqt -release --skip-plugin-types qmltooling,position,qml,qsqlpsql,qsqlodbc,qsqlmimer qlog.exe
