@@ -80,13 +80,7 @@ jobs:
         Start-Process $setup1.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait
         if (-not (Test-Path 'C:\Program Files (x86)\Afreet\OmniRig\OmniRig.exe')) { throw 'OmniRig v1 not installed' }
         # --- v2 (HB9RYZ) ---
-        $page = Invoke-WebRequest -Uri "https://www.hb9ryz.ch/omnirig/index.html" -UseBasicParsing
-        $links = $page.Links | ForEach-Object { $_.href } | Where-Object { $_ -match '\.(zip|exe)$' }
-        Write-Host "Links found:"; $links | ForEach-Object { Write-Host "  $_" }
-        $link = $links | Where-Object { $_ -match '(?i)omni' -and $_ -notmatch '(?i)ini|9700|7300|7610|rig[^/]*\.zip$' } | Select-Object -First 1
-        if (-not $link) { $link = $links | Where-Object { $_ -match '(?i)omni' } | Select-Object -First 1 }
-        $url = [System.Uri]::new([System.Uri]"https://www.hb9ryz.ch/omnirig/index.html", $link).AbsoluteUri
-        Write-Host "OmniRig v2 download: $url"
+        $url = "https://www.hb9ryz.ch/downloads/install_omnirigv21.zip"
         if ($url -match '\.zip$') {
           Invoke-WebRequest -Uri $url -OutFile v2.zip
           Expand-Archive v2.zip -DestinationPath v2
