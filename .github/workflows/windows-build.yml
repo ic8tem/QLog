@@ -45,6 +45,20 @@ jobs:
         "%VCPKG_INSTALLATION_ROOT%\vcpkg.exe" install zlib:x64-windows pthreads:x64-windows openssl:x64-windows
         if errorlevel 1 exit /b 1
 
+    # QLog links -lzlib; newer vcpkg zlib ports may name the import library differently
+    - name: zlib import library name
+      shell: pwsh
+      run: |
+        $lib = Join-Path $env:VCPKG_INSTALLATION_ROOT 'installed\x64-windows\lib'
+        Get-ChildItem $lib | ForEach-Object { Write-Host "  $($_.Name)" }
+        if (-not (Test-Path "$lib\zlib.lib")) {
+          $z = Get-ChildItem $lib -Filter *.lib | Where-Object { $_.Name -match '^(z|zlib1?|zs)\.lib$' } | Select-Object -First 1
+          if (-not $z) { throw 'zlib import library not found' }
+          Copy-Item $z.FullName "$lib\zlib.lib"
+          Write-Host "Copied $($z.Name) -> zlib.lib"
+        }
+        Get-ChildItem (Join-Path $env:VCPKG_INSTALLATION_ROOT 'installed\x64-windows\bin') | ForEach-Object { Write-Host "  bin: $($_.Name)" }
+
     - name: Hamlib
       shell: pwsh
       run: |
@@ -140,10 +154,7 @@ jobs:
         copy /Y "%HAMLIB_ROOT%\bin\*.dll" "%OUT%\" || exit /b 1
         copy /Y "%HAMLIB_ROOT%\bin\rigctld.exe" "%OUT%\"
         copy /Y C:\deps\qtkeychain\bin\*.dll "%OUT%\" || exit /b 1
-        copy /Y "%VCPKG%\bin\zlib1.dll" "%OUT%\" || exit /b 1
-        copy /Y "%VCPKG%\bin\pthreadVC3.dll" "%OUT%\"
-        copy /Y "%VCPKG%\bin\libssl-3-x64.dll" "%OUT%\" || exit /b 1
-        copy /Y "%VCPKG%\bin\libcrypto-3-x64.dll" "%OUT%\" || exit /b 1
+        copy /Y "%VCPKG%\bin\*.dll" "%OUT%\" || exit /b 1
         cd /d "%OUT%"
         windeployqt -release --skip-plugin-types qmltooling,position,qml,qsqlpsql,qsqlodbc,qsqlmimer qlog.exe
         if errorlevel 1 exit /b 1
