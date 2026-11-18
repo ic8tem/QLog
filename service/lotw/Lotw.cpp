@@ -168,7 +168,7 @@ TQSLVersion LotwBase::getTQSLVersion(const QString &tqslPath)
 
     if ( !process.waitForFinished(2000) )
     {
-        qCDebug(runtime) << "tqsl --version timed out";
+        qCWarning(runtime) << "tqsl --version failed:" << path << process.error() << process.errorString();
         return version;
     }
 
@@ -387,12 +387,16 @@ void LotwUploader::uploadAdif(const QByteArray &data, const QString &location)
 
     connect(tqslProcess, &QProcess::errorOccurred, this, [this, tqslProcess](QProcess::ProcessError error)
     {
-        qDebug() << "Process error:" << error;
+        // Keep the OS reason (e.g. access denied, elevation required) visible to the operator
+        qCWarning(runtime) << "TQSL process error:" << error
+                           << tqslProcess->program() << tqslProcess->errorString();
 
         switch ( error )
         {
         case QProcess::FailedToStart: // Error code of QProcess::execute - Process cannot start
-            emit uploadError(tr("TQSL not found"));
+            emit uploadError(tr("TQSL not found") + "\n\n"
+                             + tr("Path: %1").arg(QDir::toNativeSeparators(tqslProcess->program())) + "\n"
+                             + tr("System error: %1").arg(tqslProcess->errorString()));
             break;
 
         case QProcess::Crashed: // Error code of QProcess::execute - Process crashed
